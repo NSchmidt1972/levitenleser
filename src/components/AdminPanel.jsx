@@ -137,8 +137,8 @@ const AdminPanel = ({ onStoryCreated }) => {
         .from("stories")
         .select(
           withSlug
-            ? "id, title, slug, category, date, read_time, tag, excerpt, body, author"
-            : "id, title, category, date, read_time, tag, excerpt, body, author"
+            ? "id, title, slug, category, date, read_time, tag, excerpt, body, author, comments_count:comments(count)"
+            : "id, title, category, date, read_time, tag, excerpt, body, author, comments_count:comments(count)"
         )
         .order("date", { ascending: false });
 
@@ -576,6 +576,9 @@ const ensureUniqueSlug = async (baseSlug, currentId = null) => {
                         <p className="text-sm font-serif truncate">{item.title}</p>
                         <p className="text-[11px] text-ink/60">
                           {item.date} · {item.author || "Autor fehlt"}
+                          {typeof item.comments_count?.[0]?.count === "number"
+                            ? ` · ${item.comments_count[0].count} Kommentare`
+                            : ""}
                         </p>
                         {item.slug ? (
                           <p className="text-[11px] text-ink/50 truncate">/stories/{item.slug}</p>

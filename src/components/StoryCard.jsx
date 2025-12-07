@@ -2,6 +2,7 @@ const StoryCard = ({ story, highlight = false, onOpen }) => {
   const hasBody = !!(story.body && story.body.trim().length);
   const isClickable = hasBody && onOpen;
   const author = story.author && story.author.trim();
+  const commentsInfo = story.comments_count;
 
   return (
     <article
@@ -43,6 +44,12 @@ const StoryCard = ({ story, highlight = false, onOpen }) => {
           <span>{story.date}</span>
           <span className="w-px h-4 bg-ink/30" />
           <span>{story.readTime}</span>
+          {typeof commentsInfo === "number" ? (
+            <>
+              <span className="w-px h-4 bg-ink/30" />
+              <span>{commentsInfo === 1 ? "1 Kommentar" : `${commentsInfo} Kommentare`}</span>
+            </>
+          ) : null}
         </div>
         {hasBody && onOpen ? (
           <div className="flex flex-wrap gap-3 items-center">
