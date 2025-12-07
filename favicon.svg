@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Levitenleser">
+  <rect width="120" height="120" fill="#f8f5f0"/>
+  <path d="M24 20h72v8H24zM36 36h48v8H36zM24 52h72v8H24zM24 68h72v8H24zM36 84h48v8H36z" fill="#1c1c1a"/>
+  <text x="60" y="112" text-anchor="middle" font-family="Georgia,serif" font-size="18" fill="#b5302f">L</text>
+</svg>
