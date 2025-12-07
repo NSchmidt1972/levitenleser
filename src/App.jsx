@@ -9,12 +9,64 @@ import { parseStoryDate } from "./utils/storyDates";
 import { legalPages } from "./legal/legalPages";
 import useCookieConsent from "./hooks/useCookieConsent";
 
+const slugify = (text) => {
+  if (!text) return "geschichte";
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+};
+
+const ensureSlug = (story, idx = 0) => {
+  const provided = slugify(story.slug);
+  const fromTitle = slugify(story.title || story.tag || story.category || "geschichte");
+  const base = provided && !provided.startsWith("-") ? provided : fromTitle;
+  const suffix = provided ? "" : `-${story.id ?? idx + 1}`;
+  return { ...story, slug: slugify(`${base}${suffix}`) };
+};
+
+const setMetaTag = (key, content, attr = "name") => {
+  if (typeof document === "undefined" || !key || !content) return;
+  let el = document.head.querySelector(`[${attr}="${key}"]`);
+  if (!el) {
+    el = document.createElement("meta");
+    el.setAttribute(attr, key);
+    document.head.appendChild(el);
+  }
+  el.setAttribute("content", content);
+};
+
+const setCanonical = (url) => {
+  if (typeof document === "undefined" || !url) return;
+  let link = document.head.querySelector('link[rel="canonical"]');
+  if (!link) {
+    link = document.createElement("link");
+    link.setAttribute("rel", "canonical");
+    document.head.appendChild(link);
+  }
+  link.setAttribute("href", url);
+};
+
+const TAGS = [
+  "Allgemeines",
+  "Finanzen",
+  "Gesellschaft",
+  "Medien",
+  "Politik",
+  "Reise",
+  "Sport",
+  "Technik",
+  "Wirtschaft"
+];
+
 function App() {
-  const [stories, setStories] = useState(fallbackStories);
+  const [stories, setStories] = useState(() => fallbackStories.map((s, idx) => ensureSlug(s, idx)));
   const [loading, setLoading] = useState(!!supabase);
   const [error, setError] = useState(null);
   const [route, setRoute] = useState(typeof window !== "undefined" ? window.location.pathname : "/");
-  const [modalStory, setModalStory] = useState(null);
   const [activeTag, setActiveTag] = useState(null);
   const [newsletterEmail, setNewsletterEmail] = useState("");
   const [newsletterStatus, setNewsletterStatus] = useState({ state: "idle", message: "" });
@@ -34,43 +86,61 @@ function App() {
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    if (modalStory) {
-      const original = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = original;
-      };
-    }
-  }, [modalStory]);
+    document.documentElement.lang = "de";
+  }, []);
 
   const fetchStories = useCallback(async () => {
     if (!supabase) {
       setLoading(false);
       return;
     }
-    const { data, error: err } = await supabase
-      .from("stories")
-      .select("id, title, author, category, date, read_time, tag, excerpt, body, created_at")
-      .order("date", { ascending: false });
+    const fetchWith = async (withSlug) =>
+      supabase
+        .from("stories")
+        .select(
+          withSlug
+            ? "id, title, slug, author, category, date, read_time, tag, excerpt, body, created_at"
+            : "id, title, author, category, date, read_time, tag, excerpt, body, created_at"
+        )
+        .order("date", { ascending: false });
+
+    let data;
+    let err;
+    ({ data, error: err } = await fetchWith(true));
+
+    if (err && err.message && err.message.toLowerCase().includes("slug")) {
+      ({ data, error: err } = await fetchWith(false));
+      if (!err) {
+        setError("Hinweis: Supabase-Spalte slug fehlt. Bitte Migration ausführen, Daten werden dennoch geladen.");
+      }
+    }
+
     if (err) {
       setError("Konnte Supabase-Daten nicht laden. Fallback wird genutzt.");
-      setStories(fallbackStories);
+      setStories(fallbackStories.map((s, idx) => ensureSlug(s, idx)));
       setLoading(false);
       return;
     }
-    const mapped = data.map((row) => ({
-      id: row.id,
-      title: row.title,
-      author: row.author || "",
-      category: row.category || "Feuilleton",
-      date: row.date,
-      readTime: row.read_time || "–",
-      tag: row.tag,
-      excerpt: row.excerpt,
-      body: row.body || "",
-      created_at: row.created_at
-    }));
-    setStories(mapped.length ? mapped : fallbackStories);
+
+    const mapped = (data || []).map((row, idx) =>
+      ensureSlug(
+        {
+          id: row.id,
+          title: row.title,
+          slug: row.slug,
+          author: row.author || "",
+          category: row.category || "Feuilleton",
+          date: row.date,
+          readTime: row.read_time || "–",
+          tag: row.tag,
+          excerpt: row.excerpt,
+          body: row.body || "",
+          created_at: row.created_at
+        },
+        idx
+      )
+    );
+    setStories(mapped.length ? mapped : fallbackStories.map((s, idx) => ensureSlug(s, idx)));
     setLoading(false);
   }, []);
 
@@ -134,7 +204,7 @@ function App() {
   }, [confirmSubscription]);
 
   const tagFilters = useMemo(() => {
-    const set = new Set();
+    const set = new Set(TAGS);
     sortedStories.forEach((s) => {
       const tag = (s.tag || s.category || "").trim();
       if (tag) set.add(tag);
@@ -162,10 +232,66 @@ function App() {
     return filteredArchiveStories;
   }, [activeTag, filteredArchiveStories]);
 
+  const storySlug = useMemo(() => {
+    if (!route.startsWith("/stories/")) return null;
+    const raw = route.replace("/stories/", "").replace(/\/+$/, "");
+    return decodeURIComponent(raw);
+  }, [route]);
+
+  const currentStory = useMemo(() => {
+    if (!storySlug) return null;
+    return sortedStories.find((s) => s.slug === storySlug) || null;
+  }, [sortedStories, storySlug]);
+
   const navigate = useCallback((path) => {
     window.history.pushState({}, "", path);
     setRoute(path);
   }, []);
+
+  useEffect(() => {
+    const baseTitle = "Der Levitenleser – Kurzgeschichten";
+    const baseDescription =
+      "Der Levitenleser veröffentlicht regelmäßig Kurzgeschichten im Stil des Feuilletons – kurz, pointiert, zugänglich.";
+    let title = baseTitle;
+    let description = baseDescription;
+
+    const origin = typeof window !== "undefined" ? window.location.origin : "https://levitenleser.de";
+    const [pathOnly] = (route || "/").split("#");
+    const canonicalPath = pathOnly && pathOnly.trim() !== "" ? pathOnly : "/";
+    const canonicalUrl = `${origin}${canonicalPath.startsWith("/") ? canonicalPath : `/${canonicalPath}`}`;
+
+    if (route.startsWith("/newsletter")) {
+      title = "Newsletter – Der Levitenleser";
+      description = "Eine kurze E-Mail, sobald eine neue Kurzgeschichte erscheint. Datenschutzfreundlich und selten.";
+    } else if (route.startsWith("/impressum")) {
+      title = "Impressum – Der Levitenleser";
+      description = "Impressum und Kontakt für Der Levitenleser.";
+    } else if (route.startsWith("/datenschutz")) {
+      title = "Datenschutz – Der Levitenleser";
+      description = "Informationen zum Datenschutz und zur Datenverarbeitung bei Der Levitenleser.";
+    } else if (route.startsWith("/cms")) {
+      title = "CMS – Der Levitenleser";
+      description = "Interner Bereich zur Verwaltung der Kurzgeschichten.";
+    } else if (route.startsWith("/stories/") && currentStory) {
+      title = `${currentStory.title} – Der Levitenleser`;
+      description = currentStory.excerpt?.slice(0, 160) || baseDescription;
+    } else if (leadStory) {
+      title = `${leadStory.title} – Der Levitenleser`;
+      description = leadStory.excerpt?.slice(0, 160) || baseDescription;
+    }
+
+    if (typeof document !== "undefined") {
+      document.title = title;
+    }
+    setCanonical(canonicalUrl);
+    setMetaTag("description", description);
+    setMetaTag("og:title", title, "property");
+    setMetaTag("og:description", description, "property");
+    setMetaTag("og:url", canonicalUrl, "property");
+    setMetaTag("twitter:card", "summary_large_image", "name");
+    setMetaTag("twitter:title", title, "name");
+    setMetaTag("twitter:description", description, "name");
+  }, [currentStory, leadStory, route]);
 
   useEffect(() => {
     const onPopState = () => setRoute(window.location.pathname);
@@ -174,9 +300,68 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof document === "undefined") return;
+    const existing = document.getElementById("ld-json-story");
+    if (!leadStory && !currentStory) {
+      existing?.remove();
+      return;
+    }
+
+    const story = currentStory || leadStory;
+
+    const toIso = (s) => {
+      if (!s) return null;
+      const rawDate = s.created_at || s.date;
+      if (!rawDate) return null;
+      const parsed = s.created_at ? new Date(rawDate) : parseStoryDate(rawDate);
+      if (!parsed || Number.isNaN(parsed.getTime())) return null;
+      return parsed.toISOString();
+    };
+
+    const datePublished = toIso(story);
+    const origin = typeof window !== "undefined" ? window.location.origin : "https://levitenleser.de";
+    const structured = {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      headline: story.title,
+      description: story.excerpt || "",
+      author: {
+        "@type": "Person",
+        name: story.author || "Der Levitenleser"
+      },
+      publisher: {
+        "@type": "Organization",
+        name: "Der Levitenleser"
+      },
+      datePublished: datePublished || undefined,
+      articleSection: story.tag || story.category || "Kurzgeschichte",
+      url: `${origin}${route}`,
+      inLanguage: "de-DE"
+    };
+
+    const script = document.createElement("script");
+    script.type = "application/ld+json";
+    script.id = "ld-json-story";
+    script.textContent = JSON.stringify(structured);
+    existing?.remove();
+    document.head.appendChild(script);
+  }, [currentStory, leadStory, route]);
+
+  useEffect(() => {
     // Mobile-Menü schließen, sobald Route oder Modal wechselt
     setMobileNavOpen(false);
-  }, [route, modalStory]);
+  }, [route]);
+
+  useEffect(() => {
+    if (!route.startsWith("/stories/")) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        navigate("/#archive");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate, route]);
 
   const handleNewsletterSubmit = useCallback(
     async (e) => {
@@ -620,6 +805,207 @@ function App() {
     );
   }
 
+  if (route.startsWith("/stories/")) {
+    const story = currentStory;
+    return (
+      <div className={`min-h-screen ${invertReader ? "bg-ink text-parchment" : "bg-parchment text-ink"}`}>
+        <header className="border-b border-stone/80 bg-white/80 backdrop-blur-md sticky top-0 z-30">
+          <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+            <button
+              type="button"
+              className="flex flex-col gap-1 text-left bg-transparent border-0 p-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+              onClick={() => navigate("/")}
+              aria-label="Zur Startseite"
+              title="Zur Startseite"
+            >
+              <p className="text-[11px] uppercase tracking-wideish text-ink/70 font-sans">
+                Der Levitenleser – Kurzgeschichten
+              </p>
+              <h1 className="text-3xl md:text-4xl font-serif tracking-tight">DER LEVITENLESER</h1>
+            </button>
+            <div className="flex items-center gap-4">
+              <nav className="hidden md:flex items-center gap-6 text-xs uppercase tracking-wideish font-sans text-ink/80">
+                <a
+                  className="hover:text-accent transition"
+                  href="/"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate("/");
+                  }}
+                >
+                  Startseite
+                </a>
+                <a
+                  className="hover:text-accent transition"
+                  href="/#archive"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate("/");
+                    setActiveTag(null);
+                  }}
+                >
+                  Archiv
+                </a>
+              </nav>
+              <button
+                type="button"
+                className="md:hidden inline-flex items-center justify-center w-10 h-10 border border-stone bg-white text-ink hover:text-accent"
+                onClick={() => setMobileNavOpen((prev) => !prev)}
+                aria-label="Menü öffnen oder schließen"
+              >
+                <span className="sr-only">Menü</span>
+                <span className="flex flex-col gap-1.5">
+                  <span
+                    className={`block h-0.5 w-5 bg-current transition ${
+                      mobileNavOpen ? "translate-y-1.5 rotate-45" : ""
+                    }`}
+                  />
+                  <span className={`block h-0.5 w-5 bg-current transition ${mobileNavOpen ? "opacity-0" : ""}`} />
+                  <span
+                    className={`block h-0.5 w-5 bg-current transition ${
+                      mobileNavOpen ? "-translate-y-1.5 -rotate-45" : ""
+                    }`}
+                  />
+                </span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {mobileNavOpen ? (
+          <div className="md:hidden border-b border-stone bg-white">
+            <nav className="max-w-6xl mx-auto px-4 py-4 space-y-3 text-sm uppercase tracking-wideish font-sans text-ink/80">
+              <a
+                className="block hover:text-accent transition"
+                href="/"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate("/");
+                  setMobileNavOpen(false);
+                }}
+              >
+                Startseite
+              </a>
+              <a
+                className="block hover:text-accent transition"
+                href="/#archive"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate("/");
+                  setActiveTag(null);
+                  setMobileNavOpen(false);
+                }}
+              >
+                Archiv
+              </a>
+            </nav>
+          </div>
+        ) : null}
+
+        <main className="px-4 py-14 md:py-16" onClick={story ? () => navigate("/#archive") : undefined}>
+          <div className="max-w-4xl mx-auto space-y-8">
+          {!story ? (
+            <div className="border border-stone bg-white/80 backdrop-blur-sm p-6 md:p-8 shadow-editorial space-y-4">
+              <h2 className="text-2xl font-serif">Text nicht gefunden</h2>
+              <p className="text-sm text-ink/70 font-sans">
+                Dieser Text scheint nicht mehr verfügbar zu sein. Schau im Archiv nach anderen Geschichten.
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate("/#archive")}
+                className="inline-flex items-center justify-center px-4 py-2 bg-ink text-white text-xs uppercase tracking-wideish hover:bg-accent transition"
+              >
+                Zum Archiv
+              </button>
+            </div>
+          ) : (
+            <article
+              className={`border p-6 md:p-8 shadow-editorial space-y-6 ${
+                invertReader
+                  ? "border-parchment/30 bg-ink text-parchment"
+                  : "border-stone bg-white/90 backdrop-blur-sm text-ink"
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex flex-wrap items-center gap-3 justify-between text-[11px] uppercase tracking-wideish font-sans">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => adjustReaderScale(-0.1)}
+                    className={`h-8 px-2 border text-xs transition ${
+                      invertReader
+                        ? "border-parchment/30 text-parchment/80 hover:border-accent hover:text-accent"
+                        : "border-ink/20 text-ink/70 hover:border-accent hover:text-accent"
+                    }`}
+                    aria-label="Text kleiner"
+                  >
+                    A−
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustReaderScale(0.1)}
+                    className={`h-8 px-2 border text-xs transition ${
+                      invertReader
+                        ? "border-parchment/30 text-parchment/80 hover:border-accent hover:text-accent"
+                        : "border-ink/20 text-ink/70 hover:border-accent hover:text-accent"
+                    }`}
+                    aria-label="Text größer"
+                  >
+                    A+
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInvertReader((prev) => !prev)}
+                    className={`h-8 px-3 border text-xs transition ${
+                      invertReader
+                        ? "border-parchment/30 text-parchment/80 hover:border-accent hover:text-accent"
+                        : "border-ink/20 text-ink/70 hover:border-accent hover:text-accent"
+                    }`}
+                    aria-label="Farbschema invertieren"
+                  >
+                    {invertReader ? "hell" : "dunkel"}
+                  </button>
+                </div>
+                <span className={invertReader ? "text-parchment/60" : "text-ink/70"}>
+                  {story.date} · {story.readTime}
+                </span>
+              </div>
+              <header className="space-y-2">
+                <h2 className="text-3xl md:text-4xl font-serif leading-tight">{story.title}</h2>
+                {story.author ? (
+                  <p className={`text-sm font-serif italic ${invertReader ? "text-parchment/70" : "text-ink/70"}`}>
+                    Von {story.author}
+                  </p>
+                ) : null}
+              </header>
+              <div
+                className={`text-lg md:text-xl font-sans leading-relaxed whitespace-pre-line dropcap ${
+                  invertReader ? "text-parchment/90" : "text-ink/85"
+                }`}
+                style={{ fontSize: `${1.125 * readerScale}rem` }}
+              >
+                {story.body || story.excerpt}
+              </div>
+              <div className={`pt-4 border-t ${invertReader ? "border-parchment/20" : "border-ink/10"}`}>
+                <button
+                  type="button"
+                  onClick={() => navigate("/#archive")}
+                  className={`text-xs uppercase tracking-wideish ${
+                    invertReader ? "text-parchment/70 hover:text-accent" : "text-ink/65 hover:text-accent"
+                  }`}
+                >
+                  schließen
+                </button>
+                </div>
+              </article>
+            )}
+          </div>
+        </main>
+        {cookieBanner}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-parchment text-ink">
       <header className="border-b border-stone/80 bg-white/80 backdrop-blur-md sticky top-0 z-30">
@@ -756,7 +1142,11 @@ function App() {
                 <SectionTitle title="Aktuelle Ausgabe" kicker="Frisch aus dem Notizbuch." />
                 {leadStory ? (
                   <div className="grid md:grid-cols-1 gap-6">
-                    <StoryCard story={leadStory} highlight onOpen={setModalStory} />
+                    <StoryCard
+                      story={leadStory}
+                      highlight
+                      onOpen={(story) => navigate(`/stories/${story.slug}`)}
+                    />
                   </div>
                 ) : (
                   <p className="text-sm text-ink/60 font-sans">Keine Texte vorhanden.</p>
@@ -796,25 +1186,33 @@ function App() {
               ))}
             </div>
             <div className="mt-8 grid gap-6 text-sm font-sans text-ink/80 grid-cols-1 md:grid-cols-3">
-              {archiveSelection.map((story, idx) => (
-                <button
-                  key={`${story.id ?? "story"}-${idx}`}
-                  type="button"
-                  onClick={() => setModalStory(story)}
-                  className="text-left border border-stone bg-white p-5 space-y-3 hover:shadow-editorial hover:-translate-y-0.5 transition focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                  <p className="text-xs uppercase tracking-wideish text-ink/70">
-                    {story.tag || story.category} · {story.date}
+              {activeTag && filteredArchiveStories.length === 0 ? (
+                <div className="col-span-full border border-stone bg-white p-5 space-y-3 shadow-editorial">
+                  <p className="text-xs uppercase tracking-wideish text-ink/70">Noch nichts in dieser Rubrik</p>
+                  <p className="leading-relaxed">
+                    Hier erscheint bald ein Text mit dem Tag &bdquo;{activeTag}&ldquo;. Schau gern später noch einmal
+                    vorbei oder wähle eine andere Rubrik.
                   </p>
-                  <h4 className="text-xl font-serif">{story.title}</h4>
-                  <p className="leading-relaxed">{story.excerpt}</p>
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-wideish">
-                    <span>{story.readTime}</span>
-                    <span className="w-px h-4 bg-ink/20" />
-                    <span>Lesen</span>
-                  </div>
-                </button>
-              ))}
+                </div>
+              ) : (
+                archiveSelection.map((story, idx) => (
+                  <button
+                    key={`${story.id ?? "story"}-${idx}`}
+                    type="button"
+                    onClick={() => navigate(`/stories/${story.slug}`)}
+                    className="text-left border border-stone bg-white p-5 space-y-3 hover:shadow-editorial hover:-translate-y-0.5 transition focus:outline-none focus:ring-2 focus:ring-accent"
+                  >
+                    <p className="text-xs uppercase tracking-wideish text-ink/70">{story.date}</p>
+                    <h4 className="text-xl font-serif">{story.title}</h4>
+                    <p className="leading-relaxed">{story.excerpt}</p>
+                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wideish">
+                      <span>{story.readTime}</span>
+                      <span className="w-px h-4 bg-ink/20" />
+                      <span>Lesen</span>
+                    </div>
+                  </button>
+                ))
+              )}
             </div>
           </div>
         </section>
@@ -865,95 +1263,6 @@ function App() {
         </div>
       </footer>
       {cookieBanner}
-      {modalStory ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 backdrop-blur-sm p-4"
-          onClick={() => setModalStory(null)}
-        >
-          <div
-            className={`relative max-w-3xl w-full shadow-editorial border border-stone max-h-[85vh] overflow-y-auto transition-colors ${
-              invertReader ? "bg-ink text-parchment" : "bg-white text-ink"
-            }`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-6 sm:p-8 space-y-4">
-              <div className="flex flex-wrap items-center gap-3 justify-end text-[11px] uppercase tracking-wideish font-sans">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => adjustReaderScale(-0.1)}
-                    className={`h-8 px-2 border text-xs transition ${
-                      invertReader
-                        ? "border-parchment/30 text-parchment/80 hover:border-accent hover:text-accent"
-                        : "border-ink/20 text-ink/70 hover:border-accent hover:text-accent"
-                    }`}
-                    aria-label="Text kleiner"
-                  >
-                    A−
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => adjustReaderScale(0.1)}
-                    className={`h-8 px-2 border text-xs transition ${
-                      invertReader
-                        ? "border-parchment/30 text-parchment/80 hover:border-accent hover:text-accent"
-                        : "border-ink/20 text-ink/70 hover:border-accent hover:text-accent"
-                    }`}
-                    aria-label="Text größer"
-                  >
-                    A+
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInvertReader((prev) => !prev)}
-                    className={`h-8 px-3 border text-xs transition ${
-                      invertReader
-                        ? "border-parchment/30 text-parchment/80 hover:border-accent hover:text-accent"
-                        : "border-ink/20 text-ink/70 hover:border-accent hover:text-accent"
-                    }`}
-                    aria-label="Farbschema invertieren"
-                  >
-                    {invertReader ? "hell" : "dunkel"}
-                  </button>
-                </div>
-              </div>
-              <p
-                className={`text-xs uppercase tracking-wideish font-sans ${
-                  invertReader ? "text-parchment/60" : "text-ink/70"
-                }`}
-              >
-                {modalStory.date} · {modalStory.readTime}
-              </p>
-              <h3 className="text-3xl font-serif leading-tight">{modalStory.title}</h3>
-              {modalStory.author ? (
-                <p className={`text-sm font-serif italic ${invertReader ? "text-parchment/70" : "text-ink/70"}`}>
-                  Von {modalStory.author}
-                </p>
-              ) : null}
-
-              <div
-                className={`text-lg md:text-xl font-sans leading-relaxed whitespace-pre-line dropcap ${
-                  invertReader ? "text-parchment/90" : "text-ink/85"
-                }`}
-                style={{ fontSize: `${1.125 * readerScale}rem` }}
-              >
-                {modalStory.body || modalStory.excerpt}
-              </div>
-              <div className={`pt-4 border-t ${invertReader ? "border-parchment/20" : "border-ink/10"}`}>
-                <button
-                  type="button"
-                  onClick={() => setModalStory(null)}
-                  className={`text-xs uppercase tracking-wideish ${
-                    invertReader ? "text-parchment/70 hover:text-accent" : "text-ink/65 hover:text-accent"
-                  }`}
-                >
-                  Schließen
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

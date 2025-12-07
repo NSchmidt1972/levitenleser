@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabaseClient";
 
 const initialStory = {
   title: "",
+  slug: "",
   date: "",
   read_time: "",
   tag: "",
@@ -12,7 +13,28 @@ const initialStory = {
 };
 
 const readTimeOptions = ["3 Min", "4 Min", "5 Min", "6 Min", "7 Min", "8 Min", "10 Min", "12 Min"];
-const tagOptions = ["Allgemeines","Technik", "Politik", "Sport", "Medien", "Serie", "Neu"];
+const tagOptions = [
+  "Allgemeines",
+  "Finanzen",
+  "Gesellschaft",
+  "Medien",
+  "Politik",
+  "Reise",
+  "Sport",
+  "Technik",
+  "Wirtschaft"
+];
+
+const slugify = (text) => {
+  if (!text) return "";
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+};
 
 const formatDateHuman = (value) =>
   new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "long", year: "numeric" }).format(value);
@@ -110,10 +132,25 @@ const AdminPanel = ({ onStoryCreated }) => {
 
   const fetchStories = useCallback(async () => {
     if (!supabase) return;
-    const { data, error: err } = await supabase
-      .from("stories")
-      .select("id, title, category, date, read_time, tag, excerpt, body, author")
-      .order("date", { ascending: false });
+    const selectStories = (withSlug) =>
+      supabase
+        .from("stories")
+        .select(
+          withSlug
+            ? "id, title, slug, category, date, read_time, tag, excerpt, body, author"
+            : "id, title, category, date, read_time, tag, excerpt, body, author"
+        )
+        .order("date", { ascending: false });
+
+    let data;
+    let err;
+    ({ data, error: err } = await selectStories(true));
+    if (err && err.message && err.message.toLowerCase().includes("slug")) {
+      ({ data, error: err } = await selectStories(false));
+      if (!err) {
+        setError("Hinweis: Spalte slug fehlt in Supabase. Bitte Migration ausführen.");
+      }
+    }
     if (err) {
       setError("Konnte Stories nicht laden.");
       return;
@@ -207,6 +244,7 @@ const AdminPanel = ({ onStoryCreated }) => {
     setEditingId(s.id);
     setStory({
       title: s.title || "",
+      slug: s.slug || "",
       date: s.date || "",
       read_time: s.read_time || "",
       tag: s.tag || "",
@@ -239,6 +277,29 @@ const AdminPanel = ({ onStoryCreated }) => {
     setLoading(false);
   };
 
+const ensureUniqueSlug = async (baseSlug, currentId = null) => {
+  let candidate = baseSlug || "geschichte";
+  if (candidate.startsWith("-")) {
+    candidate = candidate.replace(/^-+/, "");
+  }
+    let counter = 1;
+    while (true) {
+      const { data, error: lookupError } = await supabase
+        .from("stories")
+        .select("id")
+        .eq("slug", candidate)
+        .limit(1)
+        .maybeSingle();
+      if (lookupError && lookupError.code !== "PGRST116") {
+        throw new Error(lookupError.message);
+      }
+      if (!data || data.id === currentId) return candidate;
+      candidate = `${baseSlug}-${counter}`;
+      counter += 1;
+      if (counter > 50) throw new Error("Konnte keinen eindeutigen Slug erzeugen.");
+    }
+  };
+
   const handleSave = async () => {
     const metaName = session?.user?.user_metadata?.name || session?.user?.user_metadata?.full_name;
     const authorValue = story.author || metaName || session?.user?.email || "";
@@ -253,8 +314,19 @@ const AdminPanel = ({ onStoryCreated }) => {
     setLoading(true);
     setError("");
     setMessage("");
+    const baseSlug = slugify(story.slug || story.title);
+    let finalSlug = "";
+    try {
+      finalSlug = await ensureUniqueSlug(baseSlug, editingId);
+    } catch (slugErr) {
+      setError(slugErr.message || "Konnte Slug nicht bestimmen.");
+      setLoading(false);
+      return;
+    }
+
     const payload = {
       title: story.title,
+      slug: finalSlug,
       category: "Feuilleton",
       date: story.date,
       read_time: story.read_time,
@@ -270,7 +342,11 @@ const AdminPanel = ({ onStoryCreated }) => {
       : await supabase.from("stories").insert(payload).select("id").single();
 
     if (err) {
-      setError(err.message);
+      if (err.message && err.message.toLowerCase().includes("slug")) {
+        setError("Supabase-Spalte slug fehlt. Bitte Migration ausführen (siehe Anleitung).");
+      } else {
+        setError(err.message);
+      }
       setLoading(false);
       return;
     }
@@ -379,11 +455,11 @@ const AdminPanel = ({ onStoryCreated }) => {
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="flex items-center justify-between border border-stone border-l-4 border-l-ink/60 bg-white p-4 rounded shadow-editorial">
-            <div className="space-y-1">
-              <p className="text-[11px] uppercase tracking-wideish text-ink/70">Angemeldet als</p>
-              <p className="text-sm text-ink/80">{session.user.email}</p>
-            </div>
+      <div className="flex items-center justify-between border border-stone border-l-4 border-l-ink/60 bg-white p-4 rounded shadow-editorial">
+        <div className="space-y-1">
+          <p className="text-[11px] uppercase tracking-wideish text-ink/70">Angemeldet als</p>
+          <p className="text-sm text-ink/80">{session.user.email}</p>
+        </div>
             <button
               type="button"
               onClick={handleLogout}
@@ -400,6 +476,12 @@ const AdminPanel = ({ onStoryCreated }) => {
                 placeholder="Titel"
                 value={story.title}
                 onChange={(e) => setStory((s) => ({ ...s, title: e.target.value }))}
+              />
+              <input
+                className="border border-ink/20 px-3 py-2 bg-parchment"
+                placeholder="Slug (URL, wird automatisch erzeugt)"
+                value={story.slug}
+                onChange={(e) => setStory((s) => ({ ...s, slug: slugify(e.target.value) }))}
               />
               <input
                 className="border border-ink/20 px-3 py-2 bg-parchment"
@@ -495,6 +577,9 @@ const AdminPanel = ({ onStoryCreated }) => {
                         <p className="text-[11px] text-ink/60">
                           {item.date} · {item.author || "Autor fehlt"}
                         </p>
+                        {item.slug ? (
+                          <p className="text-[11px] text-ink/50 truncate">/stories/{item.slug}</p>
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <button

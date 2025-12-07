@@ -24,11 +24,11 @@ const StoryCard = ({ story, highlight = false, onOpen }) => {
     >
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-white/40 to-white opacity-0 transition group-hover:opacity-100" />
       <div className="p-6 sm:p-8 space-y-4 relative">
-        <p className="flex items-center gap-2 text-xs uppercase tracking-wideish text-ink/70 font-sans">
+        <div className="flex items-center gap-3 text-xs uppercase tracking-wideish text-ink/70 font-sans">
           <span className="h-px flex-1 bg-ink/20" />
-          {story.tag || story.category}
+          <span className="inline-flex items-center gap-1 px-3 py-1">{story.tag || story.category}</span>
           <span className="h-px flex-1 bg-ink/20" />
-        </p>
+        </div>
         <h3 className="text-2xl font-serif leading-snug group-hover:text-accent transition">{story.title}</h3>
         <p className="text-sm font-sans text-ink/75 leading-relaxed dropcap">{story.excerpt}</p>
         <div className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-wideish text-ink/70 font-sans">
