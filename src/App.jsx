@@ -820,10 +820,7 @@ function App() {
         </section>
 
         {!isSubscribed ? (
-          <section
-            id="newsletter"
-            className="bg-gradient-to-b from-parchment via-white to-parchment"
-          >
+          <section id="newsletter" className="bg-gradient-to-b from-white via-parchment to-white">
             <div className="max-w-6xl mx-auto px-4 py-14 md:py-16 space-y-8">
               <SectionTitle
                 overline="Newsletter"
