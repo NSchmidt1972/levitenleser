@@ -74,6 +74,10 @@ function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [readerScale, setReaderScale] = useState(1);
   const [invertReader, setInvertReader] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentForm, setCommentForm] = useState({ author: "", body: "", trap: "", open: false });
+  const [commentStatus, setCommentStatus] = useState({ state: "idle", message: "" });
   const { showCookieBanner, handleCookieChoice } = useCookieConsent();
   const nextSunday = useMemo(() => {
     const now = new Date();
@@ -99,8 +103,8 @@ function App() {
         .from("stories")
         .select(
           withSlug
-            ? "id, title, slug, author, category, date, read_time, tag, excerpt, body, created_at"
-            : "id, title, author, category, date, read_time, tag, excerpt, body, created_at"
+            ? "id, title, slug, author, category, date, read_time, tag, excerpt, body, created_at, comments_count:comments(count)"
+            : "id, title, author, category, date, read_time, tag, excerpt, body, created_at, comments_count:comments(count)"
         )
         .order("date", { ascending: false });
 
@@ -128,6 +132,7 @@ function App() {
           id: row.id,
           title: row.title,
           slug: row.slug,
+          comments_count: Array.isArray(row.comments_count) ? row.comments_count[0]?.count ?? 0 : 0,
           author: row.author || "",
           category: row.category || "Feuilleton",
           date: row.date,
@@ -243,6 +248,27 @@ function App() {
     return sortedStories.find((s) => s.slug === storySlug) || null;
   }, [sortedStories, storySlug]);
 
+  const fetchComments = useCallback(
+    async (storyId) => {
+      if (!supabase || !storyId) return;
+      setCommentsLoading(true);
+      const { data, error: err } = await supabase
+        .from("comments")
+        .select("id, author_name, body, created_at, status")
+        .eq("story_id", storyId)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false });
+      if (err) {
+        setCommentStatus({ state: "error", message: "Kommentare konnten nicht geladen werden." });
+        setComments([]);
+      } else {
+        setComments(data || []);
+      }
+      setCommentsLoading(false);
+    },
+    []
+  );
+
   const navigate = useCallback((path) => {
     window.history.pushState({}, "", path);
     setRoute(path);
@@ -298,6 +324,11 @@ function App() {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    if (!currentStory?.id) return;
+    fetchComments(currentStory.id);
+  }, [currentStory?.id, fetchComments]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -362,6 +393,42 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate, route]);
+
+  const handleCommentSubmit = useCallback(
+    async (e) => {
+      e.preventDefault();
+      if (!currentStory?.id) return;
+      if (!supabase) {
+        setCommentStatus({ state: "error", message: "Supabase ist nicht konfiguriert." });
+        return;
+      }
+      if (commentForm.trap) {
+        setCommentStatus({ state: "error", message: "Ungültige Eingabe." });
+        return;
+      }
+      const author = commentForm.author.trim();
+      const body = commentForm.body.trim();
+      if (!body) {
+        setCommentStatus({ state: "error", message: "Bitte einen Kommentar eintragen." });
+        return;
+      }
+      setCommentStatus({ state: "loading", message: "Wird gespeichert …" });
+      const { error: err } = await supabase.from("comments").insert({
+        story_id: currentStory.id,
+        author_name: author || "Leser:in",
+        body,
+        status: "approved"
+      });
+      if (err) {
+        setCommentStatus({ state: "error", message: "Konnte Kommentar nicht speichern." });
+        return;
+      }
+      setCommentForm({ author: "", body: "", trap: "", open: false });
+      setCommentStatus({ state: "success", message: "Danke für deinen Kommentar!" });
+      fetchComments(currentStory.id);
+    },
+    [commentForm.author, commentForm.body, commentForm.trap, currentStory?.id, fetchComments]
+  );
 
   const handleNewsletterSubmit = useCallback(
     async (e) => {
@@ -920,11 +987,11 @@ function App() {
             </div>
           ) : (
             <article
-              className={`border p-6 md:p-8 shadow-editorial space-y-6 ${
-                invertReader
-                  ? "border-parchment/30 bg-ink text-parchment"
-                  : "border-stone bg-white/90 backdrop-blur-sm text-ink"
-              }`}
+                className={`border p-6 md:p-8 shadow-editorial space-y-6 ${
+                  invertReader
+                    ? "border-parchment/40 bg-ink text-parchment"
+                    : "border-stone bg-white/90 backdrop-blur-sm text-ink"
+                }`}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex flex-wrap items-center gap-3 justify-between text-[11px] uppercase tracking-wideish font-sans">
@@ -996,8 +1063,130 @@ function App() {
                 >
                   schließen
                 </button>
-                </div>
-              </article>
+              </div>
+              <section
+                className={`space-y-4 pt-4 border-t ${
+                  invertReader ? "border-parchment/30" : "border-ink/10"
+                }`}
+              >
+                <h2 className="text-xl font-serif">Kommentare</h2>
+                {!supabase ? (
+                  <p className="text-sm text-ink/70">Kommentare sind offline nicht verfügbar.</p>
+                ) : (
+                  <>
+                    <div className="space-y-3">
+                      {commentsLoading ? (
+                        <p className="text-sm text-ink/70">Lade Kommentare …</p>
+                      ) : comments.length === 0 ? (
+                        <p className="text-sm text-ink/60">Noch keine Kommentare vorhanden.</p>
+                      ) : (
+                        comments.map((c) => (
+                          <div
+                            key={c.id}
+                            className={`border px-3 py-2 ${
+                              invertReader ? "border-parchment/30" : "border-ink/10 bg-white/60"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between text-xs uppercase tracking-wideish text-ink/60">
+                              <span>{c.author_name || "Leser:in"}</span>
+                              <span>
+                                {new Intl.DateTimeFormat("de-DE", {
+                                  day: "2-digit",
+                                  month: "long",
+                                  year: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit"
+                                }).format(new Date(c.created_at))}
+                              </span>
+                            </div>
+                            <p className={`mt-2 text-sm leading-relaxed ${invertReader ? "text-parchment/85" : ""}`}>
+                              {c.body}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <div className="mt-6 space-y-3">
+                      <button
+                        type="button"
+                        className={`inline-flex items-center justify-center px-4 py-2 border text-xs uppercase tracking-wideish hover:border-accent hover:text-accent transition ${
+                          invertReader ? "border-parchment/40 text-parchment/80" : "border-ink/30"
+                        }`}
+                        onClick={() => setCommentForm((prev) => ({ ...prev, open: !prev.open }))}
+                      >
+                        {commentForm.open ? "Formular schließen" : "Einen Kommentar hinterlassen"}
+                      </button>
+                      {commentForm.open ? (
+                        <form
+                          className={`space-y-3 border p-4 ${
+                            invertReader ? "border-parchment/30 bg-ink/40 text-parchment" : "border-ink/10 bg-white/40"
+                          }`}
+                          onSubmit={(e) => {
+                            handleCommentSubmit(e);
+                            setCommentForm((prev) => ({ ...prev, open: false }));
+                          }}
+                        >
+                          <div className="grid md:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-xs uppercase tracking-wideish text-ink/70">Name (optional)</label>
+                              <input
+                                className={`w-full border px-3 py-2 focus:outline-none focus:border-accent ${
+                                  invertReader ? "border-parchment/30 bg-ink/40 text-parchment" : "border-ink/20 bg-parchment"
+                                }`}
+                                value={commentForm.author || ""}
+                                onChange={(e) => setCommentForm((prev) => ({ ...prev, author: e.target.value }))}
+                                placeholder="Dein Name"
+                              />
+                            </div>
+                            <div className="hidden">
+                              <label>Bitte leer lassen</label>
+                              <input
+                                tabIndex={-1}
+                                autoComplete="off"
+                                value={commentForm.trap || ""}
+                                onChange={(e) => setCommentForm((prev) => ({ ...prev, trap: e.target.value }))}
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs uppercase tracking-wideish text-ink/70">Kommentar</label>
+                            <textarea
+                              className={`w-full border px-3 py-2 focus:outline-none focus:border-accent min-h-[100px] ${
+                                invertReader ? "border-parchment/30 bg-ink/40 text-parchment" : "border-ink/20 bg-parchment"
+                              }`}
+                              value={commentForm.body || ""}
+                              onChange={(e) => setCommentForm((prev) => ({ ...prev, body: e.target.value }))}
+                              placeholder="Was denkst du?"
+                              required
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            className="inline-flex items-center justify-center px-4 py-2 bg-ink text-white text-xs uppercase tracking-wideish hover:bg-accent transition disabled:opacity-60"
+                            disabled={commentStatus.state === "loading"}
+                          >
+                            {commentStatus.state === "loading" ? "Senden …" : "Kommentar senden"}
+                          </button>
+                          {commentStatus.message ? (
+                            <p
+                              className={`text-sm ${
+                                commentStatus.state === "success" ? "text-emerald-700" : "text-accent"
+                              }`}
+                            >
+                              {commentStatus.message}
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-ink/60">
+                              Spam-Schutz aktiv. Kommentare erscheinen sofort, solange sie den Richtlinien entsprechen.
+                            </p>
+                          )}
+                        </form>
+                      ) : null}
+                    </div>
+                  </>
+                )}
+              </section>
+            </article>
             )}
           </div>
         </main>
@@ -1199,20 +1388,28 @@ function App() {
                   <button
                     key={`${story.id ?? "story"}-${idx}`}
                     type="button"
-                    onClick={() => navigate(`/stories/${story.slug}`)}
-                    className="text-left border border-stone bg-white p-5 space-y-3 hover:shadow-editorial hover:-translate-y-0.5 transition focus:outline-none focus:ring-2 focus:ring-accent"
-                  >
-                    <p className="text-xs uppercase tracking-wideish text-ink/70">{story.date}</p>
-                    <h4 className="text-xl font-serif">{story.title}</h4>
-                    <p className="leading-relaxed">{story.excerpt}</p>
-                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wideish">
-                      <span>{story.readTime}</span>
-                      <span className="w-px h-4 bg-ink/20" />
-                      <span>Lesen</span>
-                    </div>
-                  </button>
-                ))
-              )}
+                  onClick={() => navigate(`/stories/${story.slug}`)}
+                  className="text-left border border-stone bg-white p-5 space-y-3 hover:shadow-editorial hover:-translate-y-0.5 transition focus:outline-none focus:ring-2 focus:ring-accent"
+                >
+                  <p className="text-xs uppercase tracking-wideish text-ink/70">{story.date}</p>
+                  <h4 className="text-xl font-serif">{story.title}</h4>
+                  <p className="leading-relaxed">{story.excerpt}</p>
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-wideish">
+                    <span>{story.readTime}</span>
+                    <span className="w-px h-4 bg-ink/20" />
+                    <span>Lesen</span>
+                    {typeof story.comments_count === "number" ? (
+                      <>
+                        <span className="w-px h-4 bg-ink/20" />
+                        <span>
+                          {story.comments_count === 1 ? "1 Kommentar" : `${story.comments_count} Kommentare`}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
+                </button>
+              ))
+            )}
             </div>
           </div>
         </section>
