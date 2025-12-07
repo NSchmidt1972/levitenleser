@@ -971,7 +971,7 @@ function App() {
                 </span>
               </div>
               <header className="space-y-2">
-                <h2 className="text-3xl md:text-4xl font-serif leading-tight">{story.title}</h2>
+                <h1 className="text-3xl md:text-4xl font-serif leading-tight">{story.title}</h1>
                 {story.author ? (
                   <p className={`text-sm font-serif italic ${invertReader ? "text-parchment/70" : "text-ink/70"}`}>
                     Von {story.author}
