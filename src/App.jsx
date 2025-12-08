@@ -326,6 +326,12 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!route.startsWith("/stories/")) return;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [route]);
+
+  useEffect(() => {
     if (!currentStory?.id) return;
     fetchComments(currentStory.id);
   }, [currentStory?.id, fetchComments]);

@@ -3,6 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from "@supabase/supabase-js";
 import { parseStoryDate } from "../src/utils/storyDates.js";
+import { fallbackStories } from "../src/data/fallbackStories.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,9 +40,15 @@ const buildDate = (story) => {
 };
 
 const fetchStories = async () => {
+  const fromFallback = () =>
+    (fallbackStories || []).map((s, idx) => ({
+      slug: ensureSlug(s, idx),
+      lastmod: buildDate(s)
+    }));
+
   if (!supabaseUrl || !supabaseKey) {
     console.warn("SUPABASE_URL oder SUPABASE_KEY fehlen. Schreibe Sitemap nur mit statischen Seiten.");
-    return [];
+    return fromFallback();
   }
   const supabase = createClient(supabaseUrl, supabaseKey);
   const { data, error } = await supabase
@@ -50,12 +57,21 @@ const fetchStories = async () => {
     .order("date", { ascending: false });
   if (error) {
     console.warn("Konnte Stories nicht laden, schreibe statische Sitemap.", error.message);
-    return [];
+    return fromFallback();
   }
-  return (data || []).map((s, idx) => ({
+  const mapped = (data || []).map((s, idx) => ({
     slug: ensureSlug(s, idx),
     lastmod: buildDate(s)
   }));
+  // Fallback-Stories ergänzen, ohne Duplikate
+  const merged = [...mapped, ...fromFallback()];
+  const unique = Array.from(
+    merged.reduce((acc, item) => {
+      if (!acc.has(item.slug)) acc.set(item.slug, item);
+      return acc;
+    }, new Map())
+  ).map(([, value]) => value);
+  return unique;
 };
 
 const buildXml = (storyUrls) => {
