@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /cms
 
-Sitemap: https://levitenleser.de/sitemap.xml
+Sitemap: https://derlevitenleser.de/sitemap.xml

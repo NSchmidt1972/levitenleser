@@ -3,6 +3,13 @@ const StoryCard = ({ story, highlight = false, onOpen }) => {
   const isClickable = hasBody && onOpen;
   const author = story.author && story.author.trim();
   const commentsInfo = story.comments_count;
+  const wordCount = story.body
+    ? story.body
+        .replace(/<[^>]+>/g, " ")
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean).length
+    : 0;
 
   return (
     <article
@@ -44,10 +51,18 @@ const StoryCard = ({ story, highlight = false, onOpen }) => {
           <span>{story.date}</span>
           <span className="w-px h-4 bg-ink/30" />
           <span>{story.readTime}</span>
+          {wordCount ? (
+            <>
+              <span className="w-px h-4 bg-ink/30" />
+              <span className="text-ink/60">{`${wordCount} Wörter`}</span>
+            </>
+          ) : null}
           {typeof commentsInfo === "number" ? (
             <>
               <span className="w-px h-4 bg-ink/30" />
-              <span>{commentsInfo === 1 ? "1 Kommentar" : `${commentsInfo} Kommentare`}</span>
+              <span className="text-ink/60">
+                {commentsInfo === 1 ? "1 Kommentar" : `${commentsInfo} Kommentare`}
+              </span>
             </>
           ) : null}
         </div>

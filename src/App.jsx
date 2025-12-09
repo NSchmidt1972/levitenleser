@@ -1404,28 +1404,41 @@ function App() {
                   <button
                     key={`${story.id ?? "story"}-${idx}`}
                     type="button"
-                  onClick={() => navigate(`/stories/${story.slug}`)}
-                  className="text-left border border-stone bg-white p-5 space-y-3 hover:shadow-editorial hover:-translate-y-0.5 transition focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                  <p className="text-xs uppercase tracking-wideish text-ink/70">{story.date}</p>
-                  <h4 className="text-xl font-serif">{story.title}</h4>
-                  <p className="leading-relaxed">{story.excerpt}</p>
-                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-wideish">
-                    <span>{story.readTime}</span>
-                    <span className="w-px h-4 bg-ink/20" />
-                    <span>Lesen</span>
-                    {typeof story.comments_count === "number" ? (
-                      <>
-                        <span className="w-px h-4 bg-ink/20" />
-                        <span>
-                          {story.comments_count === 1 ? "1 Kommentar" : `${story.comments_count} Kommentare`}
-                        </span>
-                      </>
-                    ) : null}
-                  </div>
-                </button>
-              ))
-            )}
+                    onClick={() => navigate(`/stories/${story.slug}`)}
+                    className="text-left border border-stone bg-white p-5 space-y-3 hover:shadow-editorial hover:-translate-y-0.5 transition focus:outline-none focus:ring-2 focus:ring-accent"
+                  >
+                    <p className="text-xs uppercase tracking-wideish text-ink/70">{story.date}</p>
+                    <h4 className="text-xl font-serif">{story.title}</h4>
+                    <p className="leading-relaxed">{story.excerpt}</p>
+                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wideish text-ink/70">
+                      <span>{story.readTime}</span>
+                      <span className="w-px h-4 bg-ink/20" />
+                      <span>Lesen</span>
+                      {story.body ? (
+                        <>
+                          <span className="w-px h-4 bg-ink/20" />
+                          <span className="text-ink/60">
+                            {story.body
+                              .replace(/<[^>]+>/g, " ")
+                              .trim()
+                              .split(/\s+/)
+                              .filter(Boolean).length}{" "}
+                            Wörter
+                          </span>
+                        </>
+                      ) : null}
+                      {typeof story.comments_count === "number" ? (
+                        <>
+                          <span className="w-px h-4 bg-ink/20" />
+                          <span className="text-ink/60">
+                            {story.comments_count === 1 ? "1 Kommentar" : `${story.comments_count} Kommentare`}
+                          </span>
+                        </>
+                      ) : null}
+                    </div>
+                  </button>
+                ))
+              )}
             </div>
           </div>
         </section>

@@ -25,7 +25,7 @@ const ensureSlug = (story, idx = 0) => {
   return story.slug ? story.slug : slugify(`${base}${suffix}`);
 };
 
-const origin = process.env.SITE_URL || "https://levitenleser.de";
+const origin = process.env.SITE_URL || "https://derlevitenleser.de";
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
