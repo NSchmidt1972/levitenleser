@@ -280,6 +280,8 @@ function App() {
       "Der Levitenleser veröffentlicht regelmäßig Kurzgeschichten im Stil des Feuilletons – kurz, pointiert, zugänglich.";
     let title = baseTitle;
     let description = baseDescription;
+    let robots = "index, follow";
+    let ogType = "website";
 
     const origin = typeof window !== "undefined" ? window.location.origin : "https://levitenleser.de";
     const [pathOnly] = (route || "/").split("#");
@@ -289,6 +291,7 @@ function App() {
     if (route.startsWith("/newsletter")) {
       title = "Newsletter – Der Levitenleser";
       description = "Eine kurze E-Mail, sobald eine neue Kurzgeschichte erscheint. Datenschutzfreundlich und selten.";
+      ogType = "article";
     } else if (route.startsWith("/impressum")) {
       title = "Impressum – Der Levitenleser";
       description = "Impressum und Kontakt für Der Levitenleser.";
@@ -298,22 +301,29 @@ function App() {
     } else if (route.startsWith("/cms")) {
       title = "CMS – Der Levitenleser";
       description = "Interner Bereich zur Verwaltung der Kurzgeschichten.";
+      robots = "noindex, nofollow";
     } else if (route.startsWith("/stories/") && currentStory) {
       title = `${currentStory.title} – Der Levitenleser`;
       description = currentStory.excerpt?.slice(0, 160) || baseDescription;
+      ogType = "article";
     } else if (leadStory) {
       title = `${leadStory.title} – Der Levitenleser`;
       description = leadStory.excerpt?.slice(0, 160) || baseDescription;
+      ogType = "article";
     }
 
     if (typeof document !== "undefined") {
       document.title = title;
     }
+    setMetaTag("robots", robots);
     setCanonical(canonicalUrl);
     setMetaTag("description", description);
     setMetaTag("og:title", title, "property");
     setMetaTag("og:description", description, "property");
     setMetaTag("og:url", canonicalUrl, "property");
+    setMetaTag("og:type", ogType, "property");
+    setMetaTag("og:locale", "de_DE", "property");
+    setMetaTag("og:site_name", "Der Levitenleser", "property");
     setMetaTag("twitter:card", "summary_large_image", "name");
     setMetaTag("twitter:title", title, "name");
     setMetaTag("twitter:description", description, "name");
