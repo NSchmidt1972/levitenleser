@@ -50,6 +50,37 @@ const setCanonical = (url) => {
   link.setAttribute("href", url);
 };
 
+const NEWSLETTER_STORAGE_KEY = "newsletterSubscription";
+
+const normalizeEmail = (email) => (email || "").trim().toLowerCase();
+
+const readStoredSubscription = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.localStorage.getItem(NEWSLETTER_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed?.email) return parsed.email;
+    }
+    const legacy = window.localStorage.getItem("newsletterEmail");
+    if (legacy) return legacy;
+  } catch {
+    // Ignored: wenn Lesen/Parsing fehlschlägt.
+  }
+  return null;
+};
+
+const writeStoredSubscription = (email) => {
+  if (typeof window === "undefined" || !email) return;
+  const payload = { email, subscribedAt: new Date().toISOString() };
+  try {
+    window.localStorage.setItem(NEWSLETTER_STORAGE_KEY, JSON.stringify(payload));
+    window.localStorage.setItem("newsletterEmail", email);
+  } catch {
+    // Ignored: wenn Speichern fehlschlägt.
+  }
+};
+
 const TAGS = [
   "Allgemeines",
   "Finanzen",
@@ -176,37 +207,52 @@ function App() {
     sortedStories.length
   ]);
 
+  const persistSubscription = useCallback((email) => {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return;
+    setIsSubscribed(true);
+    writeStoredSubscription(normalized);
+  }, []);
+
   const checkSubscription = useCallback(
     async (email) => {
-      if (!supabase || !email) return false;
+      const normalized = normalizeEmail(email);
+      if (!supabase || !normalized) return { exists: false, error: !supabase ? "no-supabase" : null };
       const { data, error: lookupError } = await supabase
         .from("newsletter_signups")
         .select("email")
-        .eq("email", email)
+        .eq("email", normalized)
         .limit(1);
-      if (lookupError) return false;
-      return !!(data && data.length);
+      if (lookupError) return { exists: false, error: lookupError };
+      return { exists: !!(data && data.length), error: null };
     },
     [supabase]
   );
 
   const confirmSubscription = useCallback(
-    async (email) => {
-      const exists = await checkSubscription(email);
-      setIsSubscribed(exists);
-      if (exists && typeof window !== "undefined") {
-        window.localStorage.setItem("newsletterEmail", email);
+    async (email, { skipRemoteCheck = false } = {}) => {
+      const normalized = normalizeEmail(email);
+      if (!normalized) return;
+      if (skipRemoteCheck || !supabase) {
+        persistSubscription(normalized);
+        return;
       }
+      const { exists, error: lookupError } = await checkSubscription(normalized);
+      if (exists || lookupError) {
+        persistSubscription(normalized);
+        return;
+      }
+      setIsSubscribed(false);
     },
-    [checkSubscription]
+    [checkSubscription, persistSubscription, supabase]
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const savedEmail = window.localStorage.getItem("newsletterEmail");
+    const savedEmail = readStoredSubscription();
     if (!savedEmail) return;
+    persistSubscription(savedEmail);
     confirmSubscription(savedEmail);
-  }, [confirmSubscription]);
+  }, [confirmSubscription, persistSubscription]);
 
   const tagFilters = useMemo(() => {
     const set = new Set(TAGS);
@@ -449,7 +495,7 @@ function App() {
   const handleNewsletterSubmit = useCallback(
     async (e) => {
       e.preventDefault();
-      const email = newsletterEmail.trim().toLowerCase();
+      const email = normalizeEmail(newsletterEmail);
       if (!email) {
         setNewsletterStatus({ state: "error", message: "Bitte eine E-Mail-Adresse eintragen." });
         return;
@@ -477,7 +523,7 @@ function App() {
             : "Konnte die Anmeldung nicht speichern. Bitte später erneut versuchen."
         });
         if (duplicate) {
-          confirmSubscription(email);
+          persistSubscription(email);
         }
         return;
       }
@@ -486,9 +532,9 @@ function App() {
         state: "success",
         message: "Danke! Du bekommst eine Nachricht, sobald ein neuer Text erscheint."
       });
-      confirmSubscription(email);
+      persistSubscription(email);
     },
-    [confirmSubscription, newsletterEmail]
+    [newsletterEmail, persistSubscription, supabase]
   );
 
   const newsletterForm = (
