@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
-import { fallbackStories } from "./data/fallbackStories";
 import AdminPanel from "./components/AdminPanel";
 import SectionTitle from "./components/SectionTitle";
 import StoryCard from "./components/StoryCard";
@@ -94,7 +93,7 @@ const TAGS = [
 ];
 
 function App() {
-  const [stories, setStories] = useState(() => fallbackStories.map((s, idx) => ensureSlug(s, idx)));
+  const [stories, setStories] = useState([]);
   const [loading, setLoading] = useState(!!supabase);
   const [error, setError] = useState(null);
   const [route, setRoute] = useState(typeof window !== "undefined" ? window.location.pathname : "/");
@@ -126,6 +125,8 @@ function App() {
 
   const fetchStories = useCallback(async () => {
     if (!supabase) {
+      setError("Derzeit kein Zugriff auf die Datenbank. Bitte später noch einmal vorbeischauen.");
+      setStories([]);
       setLoading(false);
       return;
     }
@@ -141,18 +142,19 @@ function App() {
 
     let data;
     let err;
+    let warning = null;
     ({ data, error: err } = await fetchWith(true));
 
     if (err && err.message && err.message.toLowerCase().includes("slug")) {
       ({ data, error: err } = await fetchWith(false));
       if (!err) {
-        setError("Hinweis: Supabase-Spalte slug fehlt. Bitte Migration ausführen, Daten werden dennoch geladen.");
+        warning = "Hinweis: Supabase-Spalte slug fehlt. Bitte Migration ausführen, Daten werden dennoch geladen.";
       }
     }
 
     if (err) {
-      setError("Konnte Supabase-Daten nicht laden. Fallback wird genutzt.");
-      setStories(fallbackStories.map((s, idx) => ensureSlug(s, idx)));
+      setError("Derzeit kein Zugriff auf die Datenbank. Bitte später noch einmal vorbeischauen.");
+      setStories([]);
       setLoading(false);
       return;
     }
@@ -176,7 +178,8 @@ function App() {
         idx
       )
     );
-    setStories(mapped.length ? mapped : fallbackStories.map((s, idx) => ensureSlug(s, idx)));
+    setStories(mapped);
+    setError(warning);
     setLoading(false);
   }, []);
 
@@ -1400,7 +1403,16 @@ function App() {
                     />
                   </div>
                 ) : (
-                  <p className="text-sm text-ink/60 font-sans">Keine Texte vorhanden.</p>
+                  <div className="border border-stone bg-white/90 shadow-editorial p-6 space-y-2">
+                    <p className="text-xs uppercase tracking-wideish text-ink/70 font-sans">
+                      {error ? "Gerade offline" : "Noch nichts veröffentlicht"}
+                    </p>
+                    <p className="text-sm md:text-base font-sans text-ink/75 leading-relaxed">
+                      {error
+                        ? "Derzeit kein Zugriff auf die Datenbank. Bitte schau später noch einmal vorbei – dann liegt hier die nächste Geschichte bereit."
+                        : "Aktuell liegen hier noch keine Geschichten bereit. Schau bald wieder vorbei."}
+                    </p>
+                  </div>
                 )}
               </div>
             </div>
@@ -1443,6 +1455,17 @@ function App() {
                   <p className="leading-relaxed">
                     Hier erscheint bald ein Text mit dem Tag &bdquo;{activeTag}&ldquo;. Schau gern später noch einmal
                     vorbei oder wähle eine andere Rubrik.
+                  </p>
+                </div>
+              ) : !archiveSelection.length ? (
+                <div className="col-span-full border border-stone bg-white p-5 space-y-3 shadow-editorial">
+                  <p className="text-xs uppercase tracking-wideish text-ink/70">
+                    {error ? "Gerade offline" : "Noch nichts veröffentlicht"}
+                  </p>
+                  <p className="leading-relaxed">
+                    {error
+                      ? "Derzeit kein Zugriff auf die Datenbank. Bitte schau später wieder vorbei."
+                      : "Sobald eine Geschichte erscheint, findest du sie hier im Archiv."}
                   </p>
                 </div>
               ) : (
